@@ -1,4 +1,6 @@
+import glob
 import os
+
 import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
@@ -13,6 +15,9 @@ def get_conn():
 
 
 def run_migrations():
+    """Run every migration file in order. Each file is written to be
+    re-runnable (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS)."""
     with get_conn() as conn:
-        with open("migrations/001_init.sql") as f:
-            conn.execute(f.read())
+        for path in sorted(glob.glob("migrations/*.sql")):
+            with open(path) as f:
+                conn.execute(f.read())
