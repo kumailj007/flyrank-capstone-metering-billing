@@ -42,7 +42,13 @@ def get_original_response(tenant_id: str, idempotency_key: str):
     return row["response_snapshot"] if row else None
 
 
-def record_usage(tenant_id: str, tokens: int | None, idempotency_key: str, response: dict):
+def record_usage(
+    tenant_id: str,
+    tokens: int | None,
+    idempotency_key: str,
+    response: dict,
+    token_breakdown: dict | None = None,
+):
     """Record one api_call event (+ one ai_tokens event if tokens given),
     atomically, deduplicated by idempotency key.
 
@@ -68,10 +74,15 @@ def record_usage(tenant_id: str, tokens: int | None, idempotency_key: str, respo
                 conn.execute(
                     """
                     INSERT INTO usage_events
-                        (tenant_id, usage_type, quantity, idempotency_key)
-                    VALUES (%s, 'ai_tokens', %s, %s)
+                        (tenant_id, usage_type, quantity, idempotency_key, token_breakdown)
+                    VALUES (%s, 'ai_tokens', %s, %s, %s)
                     """,
-                    (tenant_id, tokens, f"{idempotency_key}:tokens"),
+                    (
+                        tenant_id,
+                        tokens,
+                        f"{idempotency_key}:tokens",
+                        json.dumps(token_breakdown) if token_breakdown else None,
+                    ),
                 )
     except UniqueViolation:
         raise DuplicateRequest(get_original_response(tenant_id, idempotency_key))

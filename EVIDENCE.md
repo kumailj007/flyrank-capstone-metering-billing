@@ -1,18 +1,18 @@
-# Evidence
+## Cost calculation: pinned pricing tests, cached-input & reasoning rules
 
-One pasted proof per Definition-of-Done checkbox (§ 6 of the brief).
-
-## Metering: exactly one usage event under retries, proven by test
-
-`docker compose exec api pytest tests/test_idempotency.py -v`
+`docker compose exec api pytest tests/test_cost.py -v`
 
 ```
-tests/test_idempotency.py::test_retry_same_key_creates_one_event_and_mirrors_response PASSED
-tests/test_idempotency.py::test_concurrent_retries_create_one_event PASSED
-tests/test_idempotency.py::test_different_keys_create_separate_events PASSED
-tests/test_idempotency.py::test_missing_idempotency_key_rejected PASSED
-==== 4 passed in 0.77s ====
+test_pinned_total_one_million_of_each_bucket_is_exactly_925_cents PASSED
+test_cached_input_is_cheaper_than_fresh_input PASSED
+test_reasoning_tokens_billed_at_output_rate PASSED
+test_categories_cannot_simply_be_added PASSED
+test_rounding_happens_once_at_rollup_not_per_event PASSED
+test_usage_endpoint_reports_pinned_cost PASSED
+==== 14 passed in 3.68s ==== (full suite)
 ```
 
-The concurrent test fires 5 identical requests simultaneously; the DB's
-UNIQUE (tenant_id, idempotency_key) constraint guarantees a single event.
+1M of each bucket = exactly 925 cents ($1.00 input + $0.25 cached +
+$4.00 output + $4.00 reasoning-as-output). Rates pinned in
+app/pricing.py; all math in integer micro-cents, rounded to cents
+once at rollup.

@@ -21,5 +21,10 @@ used + requested <= limit; 429 = quota exhausted, 402 = subscription
 not active. Retry check runs before quota check so a retry of an
 already-recorded request mirrors instead of 429ing.
 
-## Stage 5 
+## Stage 5 (cost engine)
+Money as integers: micro-cents (1/1,000,000 cent) because per-token
+prices are fractions of a cent — cents would round every token to
+zero. Rounding happens once, at rollup, never per event. Buckets
+priced at their own rates; costs summed, never token counts.
+GET /usage live.
 

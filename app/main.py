@@ -1,9 +1,10 @@
 import uuid
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.db import run_migrations
+from app.services.cost import monthly_rollup
 from app.services.meter import (
     DuplicateRequest,
     get_original_response,
@@ -26,8 +27,52 @@ def health():
 
 
 class GenerateRequest(BaseModel):
+    """Either a simple total (`tokens`) or a per-category breakdown.
+
+    With a breakdown, the quota-relevant total is the SUM of all four
+    buckets (reasoning tokens consume quota too), and cost is computed
+    per bucket at its own rate.
+    """
+
     tenant_id: uuid.UUID
     tokens: int | None = Field(default=None, gt=0)
+    input_tokens: int = Field(default=0, ge=0)
+    cached_input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def simple_xor_breakdown(self):
+        breakdown_sum = (
+            self.input_tokens
+            + self.cached_input_tokens
+            + self.output_tokens
+            + self.reasoning_tokens
+        )
+        if self.tokens and breakdown_sum:
+            raise ValueError("Provide either `tokens` or a breakdown, not both")
+        return self
+
+    @property
+    def total_tokens(self) -> int:
+        return self.tokens or (
+            self.input_tokens
+            + self.cached_input_tokens
+            + self.output_tokens
+            + self.reasoning_tokens
+        )
+
+    @property
+    def breakdown(self) -> dict | None:
+        if self.tokens:
+            return None
+        b = {
+            "input_tokens": self.input_tokens,
+            "cached_input_tokens": self.cached_input_tokens,
+            "output_tokens": self.output_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+        }
+        return b if any(b.values()) else None
 
 
 @app.post("/generate")
@@ -52,8 +97,9 @@ def generate(body: GenerateRequest, idempotency_key: str = Header(..., min_lengt
     if original is not None:
         return original
 
+    total = body.total_tokens
     try:
-        check_quota(tenant_id, body.tokens)
+        check_quota(tenant_id, total or None)
     except PaymentRequired as e:
         raise HTTPException(status_code=402, detail=e.detail)
     except QuotaExceeded as e:
@@ -61,12 +107,23 @@ def generate(body: GenerateRequest, idempotency_key: str = Header(..., min_lengt
 
     response = {
         "result": "simulated ai response",
-        "tokens_used": body.tokens or 0,
+        "tokens_used": total,
         "request_id": str(uuid.uuid4()),
     }
 
     try:
-        record_usage(tenant_id, body.tokens, idempotency_key, response)
+        record_usage(
+            tenant_id, total or None, idempotency_key, response, body.breakdown
+        )
         return response
     except DuplicateRequest as dup:
         return dup.original_response
+
+
+@app.get("/usage")
+def usage(tenant_id: uuid.UUID):
+    """The read path: { used, limit, cost } for the current month."""
+    tid = str(tenant_id)
+    if not tenant_exists(tid):
+        raise HTTPException(status_code=404, detail="Unknown tenant")
+    return monthly_rollup(tid)
