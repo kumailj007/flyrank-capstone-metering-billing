@@ -4,6 +4,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from app.db import run_migrations
+from app.routes_stripe import router as stripe_router
 from app.services.cost import monthly_rollup
 from app.services.meter import (
     DuplicateRequest,
@@ -14,6 +15,7 @@ from app.services.meter import (
 from app.services.quota import PaymentRequired, QuotaExceeded, check_quota
 
 app = FastAPI(title="Usage Metering & Billing Engine")
+app.include_router(stripe_router)
 
 
 @app.on_event("startup")
