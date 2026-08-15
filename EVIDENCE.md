@@ -1,8 +1,9 @@
 # Evidence
 
-One pasted proof per Definition-of-Done checkbox (§ 6 of the brief).
-All outputs below are real, captured from `docker compose exec api pytest tests/ -v`
-and live runs on 15 Aug 2026.
+One pasted proof per Definition-of-Done checkbox (§ 6 of the brief),
+plus the shared-requirement background job. All outputs below are real,
+captured from `docker compose exec api pytest tests/ -v` and live runs
+on 15 Aug 2026.
 
 ---
 
@@ -112,6 +113,32 @@ flipped free → pro live → `GET /usage` response:
 
 ---
 
+## BACKGROUND JOB: RECONCILIATION (shared requirement #3 + § 9 stretch goal)
+
+**Slow/bulk work off the request path, with retries and a failure alert.**
+`jobs/reconcile.py` — nightly comparison of our database against Stripe's
+view; catches missed webhooks. Motivated by a drift observed live during
+this build: a payment completed while the webhook listener was down, and
+the DB said "free" while Stripe said "pro".
+
+```
+tests/test_reconcile.py::test_missed_cancellation_is_fixed PASSED
+tests/test_reconcile.py::test_matching_state_left_untouched PASSED
+tests/test_reconcile.py::test_transient_failures_retried_then_succeed PASSED
+tests/test_reconcile.py::test_one_dead_record_does_not_stop_the_rest PASSED
+```
+
+Transient Stripe failures are retried with backoff (network blips answer
+on the third attempt in the pinned test); one permanently failing record
+is logged and counted while every other subscription still reconciles;
+total Stripe unavailability exits non-zero with a FAILURE ALERT line —
+the exit code a scheduler alerts on. Run once:
+`docker compose exec api python -m jobs.reconcile` · scheduled:
+`docker compose --profile jobs up reconciler -d` (compose profile keeps
+the default `docker compose up` unchanged).
+
+---
+
 ## DATA MODEL, TESTS & DOCUMENTATION
 
 **Database includes tenants, plans, subscriptions, and usage events;
@@ -124,11 +151,12 @@ own tenants and never observe each other's data.
 
 **Tests cover: duplicate usage prevention, quota boundary cases
 (at / just under / over), cost calculations, invalid webhook rejection,
-duplicate-webhook handling.**
+duplicate-webhook handling — plus the reconciliation job's retry,
+isolation, and drift-repair behavior.**
 Full suite, all green:
 
 ```
-============================ 18 passed in 4.76s ============================
+============================ 22 passed ============================
 ```
 
 **README + architecture diagram + setup instructions; submission-pack

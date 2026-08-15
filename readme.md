@@ -96,6 +96,12 @@ break (idempotency, webhook dedup) via constraints.
 
 ## Limitations (honest notes)
 
+- No authentication — tenant IDs are trusted identifiers, not
+  authenticated principals; anyone who knows a tenant_id can act as
+  that tenant. In production, /generate would require an API key or
+  JWT bound to the tenant (I built exactly that JWT flow in my A4
+  assignment). Out of scope here by the brief's § 6/§ 7 boundaries.
+
 - One paid plan, one Stripe price; plan limits are seed data, not an
   admin API.
 - No invoicing, proration, or overage billing — by design (see the

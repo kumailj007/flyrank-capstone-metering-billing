@@ -21,5 +21,19 @@ services:
       db:
         condition: service_healthy
 
+  # Background job (shared requirement #3): nightly reconciliation of our
+  # DB against Stripe's view — catches missed webhooks. Opt-in profile so
+  # `docker compose up` stays unchanged:
+  #   docker compose --profile jobs up reconciler -d
+  # One-off run instead: docker compose exec api python -m jobs.reconcile
+  reconciler:
+    build: .
+    env_file: .env
+    command: python -m jobs.scheduler
+    profiles: ["jobs"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
