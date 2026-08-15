@@ -6,6 +6,12 @@ check and both insert. Instead we simply INSERT and let the database's
 UNIQUE (tenant_id, idempotency_key) constraint decide: the second
 insert raises UniqueViolation, which we translate into "return the
 original response". Correct by construction.
+
+get_original_response() exists as a fast path so routes can detect a
+retry BEFORE running quota checks — a retry of a request that already
+succeeded must mirror the original response even if the tenant has
+since reached their limit. It is an optimization only; the UNIQUE
+constraint remains the real guarantee under concurrency.
 """
 import json
 
@@ -21,6 +27,19 @@ class DuplicateRequest(Exception):
 
     def __init__(self, original_response):
         self.original_response = original_response
+
+
+def get_original_response(tenant_id: str, idempotency_key: str):
+    """Return the stored response for this key, or None if unseen."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT response_snapshot FROM usage_events
+            WHERE tenant_id = %s AND idempotency_key = %s
+            """,
+            (tenant_id, idempotency_key),
+        ).fetchone()
+    return row["response_snapshot"] if row else None
 
 
 def record_usage(tenant_id: str, tokens: int | None, idempotency_key: str, response: dict):
@@ -55,15 +74,7 @@ def record_usage(tenant_id: str, tokens: int | None, idempotency_key: str, respo
                     (tenant_id, tokens, f"{idempotency_key}:tokens"),
                 )
     except UniqueViolation:
-        with get_conn() as conn:
-            row = conn.execute(
-                """
-                SELECT response_snapshot FROM usage_events
-                WHERE tenant_id = %s AND idempotency_key = %s
-                """,
-                (tenant_id, idempotency_key),
-            ).fetchone()
-        raise DuplicateRequest(row["response_snapshot"] if row else None)
+        raise DuplicateRequest(get_original_response(tenant_id, idempotency_key))
 
 
 def tenant_exists(tenant_id: str) -> bool:

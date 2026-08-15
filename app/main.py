@@ -4,7 +4,13 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import run_migrations
-from app.services.meter import DuplicateRequest, record_usage, tenant_exists
+from app.services.meter import (
+    DuplicateRequest,
+    get_original_response,
+    record_usage,
+    tenant_exists,
+)
+from app.services.quota import PaymentRequired, QuotaExceeded, check_quota
 
 app = FastAPI(title="Usage Metering & Billing Engine")
 
@@ -27,10 +33,31 @@ class GenerateRequest(BaseModel):
 @app.post("/generate")
 def generate(body: GenerateRequest, idempotency_key: str = Header(..., min_length=1)):
     """The dummy billable endpoint: simulates an AI generation,
-    records usage idempotently. (Quota check arrives in Stage 4.)"""
+    enforces quota, records usage idempotently.
+
+    Order matters:
+      1. Retry fast path — a request that already succeeded must
+         mirror its original response, even if the tenant has since
+         hit their limit. A retry is the same request, not new usage.
+      2. Quota check — reject over-limit NEW requests with 429/402
+         BEFORE any usage is recorded.
+      3. Record — the UNIQUE constraint remains the concurrency-safe
+         dedup guarantee underneath the fast path.
+    """
     tenant_id = str(body.tenant_id)
     if not tenant_exists(tenant_id):
         raise HTTPException(status_code=404, detail="Unknown tenant")
+
+    original = get_original_response(tenant_id, idempotency_key)
+    if original is not None:
+        return original
+
+    try:
+        check_quota(tenant_id, body.tokens)
+    except PaymentRequired as e:
+        raise HTTPException(status_code=402, detail=e.detail)
+    except QuotaExceeded as e:
+        raise HTTPException(status_code=429, detail=e.detail)
 
     response = {
         "result": "simulated ai response",
@@ -42,5 +69,4 @@ def generate(body: GenerateRequest, idempotency_key: str = Header(..., min_lengt
         record_usage(tenant_id, body.tokens, idempotency_key, response)
         return response
     except DuplicateRequest as dup:
-        # Retry detected: mirror the original response, record nothing.
         return dup.original_response
