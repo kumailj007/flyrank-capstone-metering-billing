@@ -1,0 +1,14 @@
+run: docker compose up --build -d
+seed: docker compose exec api python seed.py
+test: docker compose exec api pytest tests/ -v
+base_url: http://localhost:8000
+endpoints:
+  - GET /health
+  - POST /generate
+  - GET /usage
+  - POST /checkout
+  - POST /webhooks/stripe
+notes: >
+  Stripe runs in test mode only. Webhook delivery in local dev uses the
+  Stripe CLI (run via Docker): see README "Stripe setup". Copy
+  .env.example to .env and fill in the three STRIPE_ values first.
