@@ -10,7 +10,7 @@ via Stripe (test mode) with signature-verified, idempotent webhooks.
 
 ✅ Core complete: idempotent metering, quota enforcement (429/402),
 pinned cost engine, `GET /usage`, Stripe test-mode checkout + verified,
-deduplicated webhooks. **18 tests green.** Live free→pro upgrade via
+deduplicated webhooks. **22 tests green.** Live free→pro upgrade via
 webhook verified end-to-end. Build history in [BUILDLOG.md](BUILDLOG.md);
 proof per Definition-of-Done checkbox in [EVIDENCE.md](EVIDENCE.md).
 
@@ -32,10 +32,11 @@ API at http://localhost:8000 · Swagger at http://localhost:8000/docs
 docker compose exec api pytest tests/ -v
 ```
 
-18 tests: idempotency (incl. concurrent retries), quota boundaries
+22 tests: idempotency (incl. concurrent retries), quota boundaries
 (at / just under / over the limit, 429 and 402), pinned pricing
 (cached-input and reasoning-token rules, exact expected totals), and
-webhooks (forged → 400, replay → processed once, cancel → 402).
+webhooks (forged → 400, replay → processed once, cancel → 402), and the
+reconciliation job (retries, failure isolation, drift repair).
 
 ## Stripe setup (test mode only — no card, no real money, ever)
 
@@ -108,11 +109,11 @@ break (idempotency, webhook dedup) via constraints.
   non-goal in DESIGN.md); over-quota requests are rejected, never billed.
 - The monthly usage window is the calendar month in UTC
   (`date_trunc('month', now())`), not a per-tenant billing anchor.
-- Local webhook delivery depends on the Stripe CLI listener being up; a
+-- Local webhook delivery depends on the Stripe CLI listener being up; a
   payment completed while it is down leaves the DB behind Stripe until
-  the event is redelivered (a nightly reconciliation job is the natural
-  stretch fix — this failure mode was observed live during the build,
-  see BUILDLOG).
+  the event is redelivered. Mitigated by the nightly reconciliation job
+  (jobs/reconcile.py) — this failure mode was observed live during the
+  build, see BUILDLOG.
 - Tests run against the dev database (they create their own tenants and
   clean data isn't required), not an isolated test DB.
 - Concurrent near-limit requests with different idempotency keys can
